@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZipMap — Series Plotter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0f0f11;
+    --surface: #1a1a1f;
+    --surface2: #22222a;
+    --border: #2e2e38;
+    --text: #e8e8f0;
+    --text-dim: #7a7a90;
+    --accent: #4f9cf9;
+    --accent2: #c084fc;
+    --map-border: #979797;
+    --map-fill: #EAEAEA;
+    --map-fill-ocean: #d0dde8;
+    --danger: #f87171;
+    --success: #34d399;
+    --font-mono: 'Space Mono', monospace;
+    --font-body: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 14px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    gap: 12px;
+  }
+
+  .logo {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .logo span { color: var(--text-dim); font-weight: 400; }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .view-tabs {
+    display: flex;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .view-tab {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 5px 11px;
+    cursor: pointer;
+    color: var(--text-dim);
+    background: transparent;
+    border: none;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+    letter-spacing: 0.05em;
+  }
+  .view-tab.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .view-tab:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+  .proj-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .proj-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  select.proj-select {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    padding: 5px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a7a90'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+    transition: border-color 0.15s;
+  }
+  select.proj-select:hover, select.proj-select:focus { border-color: var(--accent); }
+  select.proj-select option { background: #1a1a1f; }
+
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    padding: 6px 14px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    background: var(--surface2);
+    color: var(--text);
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #3a8ae8; }
+  .btn.export { background: var(--surface2); border-color: var(--success); color: var(--success); }
+  .btn.export:hover { background: var(--success); color: #000; }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.danger:hover { background: var(--danger); color: #fff; }
+
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 300px;
+    min-width: 300px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .series-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .series-list::-webkit-scrollbar { width: 4px; }
+  .series-list::-webkit-scrollbar-track { background: transparent; }
+  .series-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .series-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .series-card.active-edit { border-color: var(--accent); }
+
+  .series-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .series-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 2px solid rgba(255,255,255,0.2);
+  }
+  .series-name-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+    min-width: 0;
+  }
+  .series-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .series-toggle {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+  .series-toggle.open { transform: rotate(90deg); }
+
+  .series-body {
+    display: none;
+    padding: 0 10px 10px;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .series-body.open { display: flex; }
+
+  .style-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .style-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 42px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+
+  .color-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  input[type="color"] {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+    padding: 2px;
+  }
+  .hex-input {
+    width: 72px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 6px;
+    outline: none;
+  }
+  .hex-input:focus { border-color: var(--accent); }
+
+  .shape-picker {
+    display: flex;
+    gap: 4px;
+  }
+  .shape-btn {
+    width: 28px;
+    height: 28px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.1s;
+    padding: 0;
+  }
+  .shape-btn svg { pointer-events: none; }
+  .shape-btn.active { border-color: var(--accent); background: rgba(79,156,249,0.15); }
+  .shape-btn:hover:not(.active) { border-color: var(--text-dim); }
+
+  .size-slider {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .size-val {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    min-width: 22px;
+    text-align: right;
+  }
+
+  textarea.zip-input {
+    width: 100%;
+    min-height: 70px;
+    max-height: 110px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 6px 8px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.6;
+  }
+  textarea.zip-input:focus { border-color: var(--accent); }
+  textarea.zip-input::placeholder { color: var(--text-dim); }
+
+  .zip-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .zip-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .zip-status .ok { color: var(--success); }
+  .zip-status .err { color: var(--danger); }
+
+  .sidebar-footer {
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 6px;
+  }
+
+  /* ── MAP AREA ── */
+  .map-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #1c2733;
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  #map-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .map-status {
+    position: absolute;
+    bottom: 12px;
+    right: 14px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(255,255,255,0.35);
+    pointer-events: none;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15,15,17,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 100;
+  }
+  .loading-overlay.hidden { display: none; }
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+  }
+
+  .tooltip {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 200;
+    display: none;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+
+  .water-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .water-label input { accent-color: var(--accent); cursor: pointer; width: 13px; height: 13px; }
+  .water-label:hover { color: var(--text); }
+
+  #map-svg { cursor: grab; }
+  #map-svg:active { cursor: grabbing; }
+
+  /* Keep border lines visually constant thickness while zooming */
+  .map-g path { vector-effect: non-scaling-stroke; }
+
+  /* scroll styling */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">ZIP<span>MAP</span></div>
+  <div class="header-controls">
+    <div class="view-tabs">
+      <button class="view-tab active" data-view="us" onclick="setView('us')">US 48+AK/HI</button>
+      <button class="view-tab" data-view="lower48" onclick="setView('lower48')">LOWER 48</button>
+      <button class="view-tab" data-view="world" onclick="setView('world')">WORLD</button>
+    </div>
+    <div class="proj-wrap" id="projWrap">
+      <span class="proj-label">PROJ</span>
+      <select class="proj-select" id="projSelect" onchange="setProjection(this.value)"></select>
+    </div>
+    <button class="btn primary" onclick="plotAll()">PLOT ZIPS</button>
+    <label class="water-label"><input type="checkbox" id="waterCheck" checked onchange="setWater(this.checked)"> WATER</label>
+    <button class="btn" onclick="resetZoom()">RESET</button>
+    <button class="btn export" onclick="exportPNG()">EXPORT PNG</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="series-list" id="seriesList"></div>
+    <div class="sidebar-footer">
+      <button class="btn primary" style="flex:1" onclick="addSeries()">+ ADD SERIES</button>
+      <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
+    </div>
+  </div>
+
+  <div class="map-area">
+    <svg id="map-svg"></svg>
+    <div class="map-status" id="mapStatus"></div>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="spinner"></div>
+      <div class="loading-text">LOADING GEO DATA…</div>
+    </div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const SERIES_COLORS = ['#4f9cf9','#f97316','#34d399','#f43f5e','#a78bfa','#fbbf24','#06b6d4','#ec4899','#84cc16','#fb7185'];
+const MAX_SERIES = 10;
+const MAX_ZIPS = 200;
+const SHAPES = ['circle','square','diamond','triangle','star'];
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let state = {
+  view: 'us',
+  projection: 'albersUsa',
+  showWater: true,
+  series: [],
+  zipDB: null,         // Map<zip, {lat,lon}>
+  geoWorld: null,
+  geoUS: null,
+  seriesCount: 0
+};
+
+// ─── ZIP DATABASE (embedded subset) ──────────────────────────────────────────
+// We'll use the public zippopotam.us API for lookups, batched
+// Actually we embed a lightweight approach: fetch from public CDN zip database
+// We'll use a pre-built approach: load from jsDelivr-hosted CSV
+
+async function loadZipDB() {
+  // Use the free GeoNames US zip code dataset via a reliable CDN
+  // Format: zip,lat,lon (we only need those 3 fields)
+  // ~42k US zip codes, ~1.5MB CSV
+  if (state.zipDB) return state.zipDB;
+  
+  // We'll use a fetch from GeoNames data mirrored on GitHub/CDN
+  // The simplemaps US zip code database (basic/free tier) is commonly mirrored
+  // Using an alternative: fetch from a public API for individual lookups (zippopotam.us)
+  // But batching is needed for 200 zips — let's use the Nominatim/zippopotam approach
+  // 
+  // Best approach for offline-capable tool: embed a compressed zip->lat/lon lookup
+  // using the USPS free zip centroid data. We'll fetch from a reliable public source.
+  
+  try {
+    // Primary source: simplemaps basic (public domain) via jsDelivr
+    const res = await fetch('https://raw.githubusercontent.com/scpike/us-state-county-zip/master/geo-data.csv');
+    if (!res.ok) throw new Error('fetch failed');
+    const text = await res.text();
+    const db = new Map();
+    const lines = text.split('\n');
+    // Format: state,state_abbr,zipcode,county,city,lat,lng
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',');
+      if (parts.length >= 7) {
+        const zip = parts[2].trim().padStart(5,'0');
+        const lat = parseFloat(parts[5]);
+        const lon = parseFloat(parts[6]);
+        if (zip && !isNaN(lat) && !isNaN(lon)) {
+          db.set(zip, {lat, lon});
+        }
+      }
+    }
+    state.zipDB = db;
+    return db;
+  } catch(e) {
+    // Fallback: use zippopotam.us API per-zip (slower but works)
+    state.zipDB = new Map();
+    state.zipDB._useAPI = true;
+    return state.zipDB;
+  }
+}
+
+async function resolveZip(zip) {
+  if (state.zipDB && !state.zipDB._useAPI) {
+    return state.zipDB.get(zip) || null;
+  }
+  // API fallback
+  try {
+    const r = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    return { lat: parseFloat(d.places[0].latitude), lon: parseFloat(d.places[0].longitude) };
+  } catch { return null; }
+}
+
+// ─── SERIES MANAGEMENT ───────────────────────────────────────────────────────
+function makeSeries() {
+  const idx = state.series.length;
+  return {
+    id: ++state.seriesCount,
+    name: `Series ${state.seriesCount}`,
+    color: SERIES_COLORS[idx % SERIES_COLORS.length],
+    shape: 'circle',
+    size: 6,
+    zipsRaw: '',
+    resolved: [],   // [{zip,lat,lon,ok}]
+    visible: true,
+    expanded: true
+  };
+}
+
+function addSeries() {
+  if (state.series.length >= MAX_SERIES) {
+    alert(`Maximum ${MAX_SERIES} series allowed.`);
+    return;
+  }
+  state.series.push(makeSeries());
+  renderSidebar();
+}
+
+function removeSeries(id) {
+  state.series = state.series.filter(s => s.id !== id);
+  renderSidebar();
+  renderPins();
+}
+
+function clearAll() {
+  if (!confirm('Clear all series data?')) return;
+  state.series = [];
+  renderSidebar();
+  renderPins();
+}
+
+// ─── SIDEBAR RENDER ───────────────────────────────────────────────────────────
+function renderSidebar() {
+  const el = document.getElementById('seriesList');
+  el.innerHTML = '';
+  state.series.forEach(s => {
+    el.appendChild(buildSeriesCard(s));
+  });
+  if (state.series.length === 0) {
+    el.innerHTML = `<div style="color:var(--text-dim);font-size:12px;font-family:var(--font-mono);text-align:center;padding:24px 12px;line-height:1.8;letter-spacing:0.05em;">NO SERIES YET<br><span style="font-size:10px;opacity:0.5">Click + ADD SERIES to start</span></div>`;
+  }
+}
+
+function shapeIcon(shape, color, size=14) {
+  const c = color || '#fff';
+  switch(shape) {
+    case 'circle':   return `<svg width="${size}" height="${size}" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="${c}"/></svg>`;
+    case 'square':   return `<svg width="${size}" height="${size}" viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" rx="1.5" fill="${c}"/></svg>`;
+    case 'diamond':  return `<svg width="${size}" height="${size}" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="${c}"/></svg>`;
+    case 'triangle': return `<svg width="${size}" height="${size}" viewBox="0 0 14 14"><polygon points="7,1 13.5,13 0.5,13" fill="${c}"/></svg>`;
+    case 'star':     return `<svg width="${size}" height="${size}" viewBox="0 0 14 14"><polygon points="7,0.5 8.6,5.1 13.5,5.1 9.5,7.9 11.1,12.5 7,9.7 2.9,12.5 4.5,7.9 0.5,5.1 5.4,5.1" fill="${c}"/></svg>`;
+  }
+}
+
+function buildSeriesCard(s) {
+  const div = document.createElement('div');
+  div.className = `series-card${s.expanded ? ' active-edit' : ''}`;
+  div.id = `sc-${s.id}`;
+
+  // Count resolved zips
+  const ok = s.resolved.filter(r => r.ok).length;
+  const total = s.resolved.length;
+  const statusStr = total > 0 ? `<span class="${ok===total?'ok':'err'}">${ok}/${total}</span>` : `<span>${s.zipsRaw.split(/[\s,]+/).filter(z=>z.trim().length===5).length} entered</span>`;
+
+  div.innerHTML = `
+    <div class="series-header" onclick="toggleSeries(${s.id})">
+      <div class="series-dot" style="background:${s.color};"></div>
+      <input class="series-name-input" value="${s.name}" onclick="event.stopPropagation()" 
+             onchange="updateSeries(${s.id},'name',this.value)" />
+      <span class="series-count">${statusStr}</span>
+      <span class="series-toggle${s.expanded?' open':''}">▶</span>
+    </div>
+    <div class="series-body${s.expanded?' open':''}">
+      <div class="style-row">
+        <span class="style-label">COLOR</span>
+        <div class="color-input-wrap">
+          <input type="color" value="${s.color}" id="col-${s.id}"
+                 oninput="updateSeries(${s.id},'color',this.value);document.getElementById('hex-${s.id}').value=this.value;" />
+          <input class="hex-input" id="hex-${s.id}" value="${s.color}" maxlength="7"
+                 onchange="syncColor(${s.id},this.value)" />
+        </div>
+      </div>
+      <div class="style-row">
+        <span class="style-label">SHAPE</span>
+        <div class="shape-picker">
+          ${SHAPES.map(sh => `<button class="shape-btn${s.shape===sh?' active':''}" title="${sh}" onclick="updateSeries(${s.id},'shape','${sh}');renderSidebar()">${shapeIcon(sh, s.shape===sh?s.color:'#888')}</button>`).join('')}
+        </div>
+      </div>
+      <div class="style-row">
+        <span class="style-label">SIZE</span>
+        <input type="range" class="size-slider" min="3" max="18" value="${s.size}"
+               oninput="updateSeries(${s.id},'size',+this.value);this.nextElementSibling.textContent=this.value" />
+        <span class="size-val">${s.size}</span>
+      </div>
+      <textarea class="zip-input" placeholder="Enter zip codes separated by commas, spaces, or newlines…
+94103, 10001, 60614" onchange="updateSeries(${s.id},'zipsRaw',this.value)">${s.zipsRaw}</textarea>
+      <div class="zip-actions">
+        <span class="zip-status" id="zs-${s.id}">
+          ${total>0 ? `<span class="${ok===total?'ok':'err'}">${ok} plotted, ${total-ok} failed</span>` : ''}
+        </span>
+        <div style="display:flex;gap:5px">
+          <button class="btn" style="padding:4px 9px;font-size:10px" onclick="toggleVisible(${s.id})">${s.visible?'HIDE':'SHOW'}</button>
+          <button class="btn danger" style="padding:4px 9px;font-size:10px" onclick="removeSeries(${s.id})">DEL</button>
+        </div>
+      </div>
+    </div>
+  `;
+  return div;
+}
+
+function toggleSeries(id) {
+  const s = state.series.find(x => x.id === id);
+  if (s) { s.expanded = !s.expanded; renderSidebar(); }
+}
+
+function toggleVisible(id) {
+  const s = state.series.find(x => x.id === id);
+  if (s) { s.visible = !s.visible; renderSidebar(); renderPins(); }
+}
+
+function updateSeries(id, key, val) {
+  const s = state.series.find(x => x.id === id);
+  if (s) s[key] = val;
+}
+
+function syncColor(id, val) {
+  if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+    updateSeries(id, 'color', val);
+    const cp = document.getElementById(`col-${id}`);
+    if (cp) cp.value = val;
+    renderSidebar();
+  }
+}
+
+// ─── PROJECTION CATALOG ──────────────────────────────────────────────────────
+// Each entry: { label, fn, views[] }  views = which map views it's valid for
+const PROJECTIONS = [
+  { id: 'albersUsa',       label: 'Albers USA',          fn: () => d3.geoAlbersUsa(),                                                          views: ['us'] },
+  { id: 'albers',          label: 'Albers',               fn: () => d3.geoAlbers(),                                                             views: ['lower48'] },
+  { id: 'conicConformal',  label: 'Lambert Conformal',    fn: () => d3.geoConicConformal().parallels([29.5,45.5]).rotate([96,0]),                views: ['lower48','world'] },
+  { id: 'conicEquidist',   label: 'Conic Equidistant',    fn: () => d3.geoConicEquidistant().parallels([29.5,45.5]).rotate([96,0]),              views: ['lower48','world'] },
+  { id: 'mercator',        label: 'Mercator',             fn: () => d3.geoMercator(),                                                           views: ['lower48','world'] },
+  { id: 'transverseMerc',  label: 'Transverse Mercator',  fn: () => d3.geoTransverseMercator(),                                                 views: ['lower48','world'] },
+  { id: 'equalEarth',      label: 'Equal Earth',          fn: () => d3.geoEqualEarth(),                                                         views: ['lower48','world'] },
+  { id: 'naturalEarth1',   label: 'Natural Earth',        fn: () => d3.geoNaturalEarth1(),                                                      views: ['lower48','world'] },
+  { id: 'azimuthalEqArea', label: 'Azimuthal Equal-Area', fn: () => d3.geoAzimuthalEqualArea(),                                                 views: ['lower48','world'] },
+  { id: 'orthographic',    label: 'Orthographic',         fn: () => d3.geoOrthographic(),                                                       views: ['lower48','world'] },
+  { id: 'stereographic',   label: 'Stereographic',        fn: () => d3.geoStereographic(),                                                      views: ['lower48','world'] },
+  { id: 'mollweide',       label: 'Mollweide',            fn: () => d3.geoMollweide ? d3.geoMollweide() : d3.geoEqualEarth(),                   views: ['world'] },
+  { id: 'winkelTripel',    label: 'Winkel Tripel',        fn: () => d3.geoWinkel3 ? d3.geoWinkel3() : d3.geoNaturalEarth1(),                   views: ['world'] },
+  { id: 'robinson',        label: 'Robinson',             fn: () => d3.geoRobinson ? d3.geoRobinson() : d3.geoNaturalEarth1(),                  views: ['world'] },
+];
+
+// Default projection per view
+const VIEW_DEFAULT_PROJ = { us: 'albersUsa', lower48: 'albers', world: 'naturalEarth1' };
+
+// ─── MAP SETUP ───────────────────────────────────────────────────────────────
+const svg = d3.select('#map-svg');
+let mapG, projection, pathFn;
+let worldTopo, usTopo;
+let zoomBehavior, zoomG;
+
+function updateProjDropdown() {
+  const sel = document.getElementById('projSelect');
+  const wrap = document.getElementById('projWrap');
+  // US 48+AK/HI is always AlbersUSA — hide the picker entirely
+  if (state.view === 'us') {
+    state.projection = 'albersUsa';
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'flex';
+  const available = PROJECTIONS.filter(p => p.views.includes(state.view));
+  sel.innerHTML = available.map(p =>
+    `<option value="${p.id}"${p.id === state.projection ? ' selected' : ''}>${p.label}</option>`
+  ).join('');
+  if (!available.find(p => p.id === state.projection)) {
+    state.projection = VIEW_DEFAULT_PROJ[state.view];
+    sel.value = state.projection;
+  }
+}
+
+function setProjection(id) {
+  state.projection = id;
+  if (worldTopo && usTopo) buildMap();
+}
+
+function getProjectionFn() {
+  const p = PROJECTIONS.find(p => p.id === state.projection);
+  return p ? p.fn() : d3.geoNaturalEarth1();
+}
+
+async function initMap() {
+  document.getElementById('loadingOverlay').classList.remove('hidden');
+  try {
+    [worldTopo, usTopo] = await Promise.all([
+      fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json').then(r=>r.json()),
+      fetch('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(r=>r.json())
+    ]);
+    loadZipDB();
+    updateProjDropdown();
+    buildMap();
+  } catch(e) {
+    document.querySelector('.loading-text').textContent = 'ERROR LOADING GEO DATA';
+    console.error(e);
+  }
+  document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+function buildMap() {
+  const svgEl = document.getElementById('map-svg');
+  const W = svgEl.clientWidth || 900;
+  const H = svgEl.clientHeight || 600;
+  const isWorld = state.view === 'world';
+  const oceanColor = isWorld ? '#2a3f52' : '#c8d8e8';
+
+  svg.selectAll('*').remove();
+
+  // Ocean background rect — toggled by water checkbox
+  svg.append('rect').attr('class','ocean-rect')
+     .attr('width', W).attr('height', H)
+     .attr('fill', oceanColor)
+     .attr('opacity', state.showWater ? 1 : 0);
+
+  // Single zoomable group containing both map and pins
+  zoomG = svg.append('g').attr('class', 'zoom-g');
+  mapG  = zoomG.append('g').attr('class', 'map-g');
+  zoomG.append('g').attr('class', 'pins-g');
+
+  let proj = getProjectionFn();
+
+  if (state.view === 'world') {
+    const sphere = {type:'Sphere'};
+    try { proj.fitSize([W, H], sphere); } catch(e) {
+      proj.fitSize([W*0.9, H*0.9], topojson.feature(worldTopo, worldTopo.objects.countries));
+      proj.translate([W/2, H/2]);
+    }
+    mapG.append('path').datum(sphere)
+       .attr('class','sphere-bg')
+       .attr('fill', oceanColor)
+       .attr('opacity', state.showWater ? 1 : 0)
+       .attr('d', d3.geoPath(proj));
+    const countries = topojson.feature(worldTopo, worldTopo.objects.countries).features;
+    mapG.selectAll('path.country').data(countries).enter().append('path').attr('class','country')
+        .attr('d', d3.geoPath(proj))
+        .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.5);
+    const usStates = topojson.feature(usTopo, usTopo.objects.states).features;
+    mapG.selectAll('path.us-state').data(usStates).enter().append('path').attr('class','us-state')
+        .attr('d', d3.geoPath(proj))
+        .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.3);
+
+  } else if (state.view === 'us') {
+    const pad = Math.min(W, H) * 0.04;
+    proj.fitExtent([[pad, pad],[W - pad, H - pad]], topojson.feature(usTopo, usTopo.objects.states));
+    const stateFeatures = topojson.feature(usTopo, usTopo.objects.states).features;
+    mapG.selectAll('path.state').data(stateFeatures).enter().append('path').attr('class','state')
+        .attr('d', d3.geoPath(proj))
+        .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.7);
+
+  } else {
+    // Contiguous 48 only: state FIPS codes are ≤ 56; territories (PR=72, USVI=78, Guam=66, etc.) are ≥ 60
+    const stFeat = topojson.feature(usTopo, usTopo.objects.states).features
+                           .filter(f => +f.id <= 56 && +f.id !== 2 && +f.id !== 15);
+    const fc = {type:'FeatureCollection', features: stFeat};
+    const pad = Math.min(W, H) * 0.04;
+    const tempProj = proj.scale(1).translate([0, 0]);
+    const tempPath = d3.geoPath(tempProj);
+    const [[x0, y0], [x1, y1]] = tempPath.bounds(fc);
+    const availW = W - pad * 2;
+    const availH = H - pad * 2;
+    const scale = Math.min(availW / (x1 - x0), availH / (y1 - y0));
+    const tx = pad + (availW - scale * (x1 - x0)) / 2 - scale * x0;
+    const ty = pad + (availH - scale * (y1 - y0)) / 2 - scale * y0;
+    proj.scale(scale).translate([tx, ty]);
+    mapG.selectAll('path.state').data(stFeat).enter().append('path').attr('class','state')
+        .attr('d', d3.geoPath(proj))
+        .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.7);
+  }
+
+  projection = proj;
+  pathFn = d3.geoPath(projection);
+
+  // ── D3 ZOOM ──────────────────────────────────────────────────────────────
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.5, 200])
+    .on('zoom', (event) => {
+      zoomG.attr('transform', event.transform);
+    });
+  svg.call(zoomBehavior);
+  // Don't double-count middle-click drag
+  svg.on('dblclick.zoom', null);
+
+  renderPins();
+  const projLabel = PROJECTIONS.find(p => p.id === state.projection)?.label || state.projection;
+  document.getElementById('mapStatus').textContent =
+    `${state.view.toUpperCase()} · ${projLabel.toUpperCase()} · scroll/drag to navigate`;
+}
+
+function resetZoom() {
+  if (zoomBehavior) svg.transition().duration(400).call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+function setWater(on) {
+  state.showWater = on;
+  svg.select('rect.ocean-rect').attr('opacity', on ? 1 : 0);
+  svg.select('path.sphere-bg').attr('opacity', on ? 1 : 0);
+}
+
+// ─── PLOTTING ────────────────────────────────────────────────────────────────
+async function plotAll() {
+  await loadZipDB();
+  const overlay = document.getElementById('loadingOverlay');
+  document.querySelector('.loading-text').textContent = 'RESOLVING ZIP CODES…';
+  overlay.classList.remove('hidden');
+
+  for (const s of state.series) {
+    const zips = s.zipsRaw.split(/[\s,\n]+/).map(z=>z.trim().replace(/\D/g,'')).filter(z=>z.length===5);
+    const unique = [...new Set(zips)].slice(0, MAX_ZIPS);
+    s.resolved = [];
+    for (const z of unique) {
+      const loc = await resolveZip(z);
+      s.resolved.push({zip: z, lat: loc?.lat, lon: loc?.lon, ok: !!loc});
+    }
+    // Update status
+    const ok = s.resolved.filter(r=>r.ok).length;
+    const total = s.resolved.length;
+    const zs = document.getElementById(`zs-${s.id}`);
+    if (zs) zs.innerHTML = `<span class="${ok===total?'ok':'err'}">${ok} plotted, ${total-ok} failed</span>`;
+  }
+
+  overlay.classList.add('hidden');
+  renderSidebar();
+  renderPins();
+}
+
+function renderPins() {
+  if (!projection) return;
+  const pinsG = zoomG ? zoomG.select('.pins-g') : svg.select('.pins-g');
+  if (pinsG.empty()) return;
+  pinsG.selectAll('*').remove();
+
+  const tooltip = document.getElementById('tooltip');
+
+  state.series.filter(s => s.visible).forEach(s => {
+    s.resolved.filter(r => r.ok).forEach(r => {
+      let xy;
+      try { xy = projection([r.lon, r.lat]); } catch(e) { return; }
+      if (!xy) return;
+
+      const g = pinsG.append('g')
+        .attr('transform', `translate(${xy[0]},${xy[1]})`)
+        .style('cursor','pointer');
+
+      drawPin(g, s.shape, s.size, s.color);
+
+      g.on('mouseover', function(event) {
+        tooltip.style.display = 'block';
+        tooltip.innerHTML = `<span style="color:${s.color}">${s.name}</span> · ${r.zip}`;
+      }).on('mousemove', function(event) {
+        tooltip.style.left = (event.clientX + 14) + 'px';
+        tooltip.style.top  = (event.clientY - 8) + 'px';
+      }).on('mouseout', function() {
+        tooltip.style.display = 'none';
+      });
+    });
+  });
+}
+
+function drawPin(g, shape, size, color) {
+  const r = size / 2;
+  switch(shape) {
+    case 'circle':
+      g.append('circle').attr('r', r).attr('fill', color).attr('stroke','rgba(0,0,0,0.3)').attr('stroke-width',0.8);
+      break;
+    case 'square':
+      g.append('rect').attr('x',-r).attr('y',-r).attr('width',size).attr('height',size).attr('rx',1)
+       .attr('fill',color).attr('stroke','rgba(0,0,0,0.3)').attr('stroke-width',0.8);
+      break;
+    case 'diamond':
+      g.append('polygon').attr('points',`0,${-r} ${r},0 0,${r} ${-r},0`)
+       .attr('fill',color).attr('stroke','rgba(0,0,0,0.3)').attr('stroke-width',0.8);
+      break;
+    case 'triangle':
+      g.append('polygon').attr('points',`0,${-r} ${r},${r} ${-r},${r}`)
+       .attr('fill',color).attr('stroke','rgba(0,0,0,0.3)').attr('stroke-width',0.8);
+      break;
+    case 'star': {
+      const pts = [];
+      for(let i=0;i<10;i++){
+        const a = (i*Math.PI/5) - Math.PI/2;
+        const rad = i%2===0 ? r : r*0.45;
+        pts.push(`${Math.cos(a)*rad},${Math.sin(a)*rad}`);
+      }
+      g.append('polygon').attr('points',pts.join(' '))
+       .attr('fill',color).attr('stroke','rgba(0,0,0,0.3)').attr('stroke-width',0.8);
+      break;
+    }
+  }
+}
+
+// ─── VIEW SWITCHING ───────────────────────────────────────────────────────────
+function setView(v) {
+  state.view = v;
+  document.querySelectorAll('.view-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.view === v);
+  });
+  // Reset to the default projection for this view, then refresh dropdown
+  state.projection = VIEW_DEFAULT_PROJ[v];
+  updateProjDropdown();
+  if (worldTopo && usTopo) buildMap();
+}
+
+// ─── EXPORT PNG ───────────────────────────────────────────────────────────────
+async function exportPNG() {
+  const svgEl = document.getElementById('map-svg');
+  const W = svgEl.clientWidth;
+  const H = svgEl.clientHeight;
+  const shortSide = Math.min(W, H);
+  const scale = 2000 / shortSide;
+  const outW = Math.round(W * scale);
+  const outH = Math.round(H * scale);
+
+  const svgClone = svgEl.cloneNode(true);
+  svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svgClone.setAttribute('width', outW);
+  svgClone.setAttribute('height', outH);
+  svgClone.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // If water is off, make ocean rect and sphere transparent in clone
+  if (!state.showWater) {
+    const oceanRect = svgClone.querySelector('rect.ocean-rect');
+    if (oceanRect) oceanRect.setAttribute('opacity', '0');
+    const sphereBg = svgClone.querySelector('path.sphere-bg');
+    if (sphereBg) sphereBg.setAttribute('opacity', '0');
+  }
+
+  const serializer = new XMLSerializer();
+  const svgStr = serializer.serializeToString(svgClone);
+  const blob = new Blob([svgStr], {type:'image/svg+xml;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    if (state.showWater) {
+      ctx.fillStyle = state.view === 'world' ? '#2a3f52' : '#c8d8e8';
+      ctx.fillRect(0, 0, outW, outH);
+    }
+    ctx.drawImage(img, 0, 0, outW, outH);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(b => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = `zipmap_${state.view}_${state.projection}_${Date.now()}.png`;
+      a.click();
+    }, 'image/png');
+  };
+  img.src = url;
+}
+
+// ─── RESIZE ───────────────────────────────────────────────────────────────────
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if(worldTopo && usTopo) buildMap(); }, 150);
+});
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+addSeries();   // Start with one series
+initMap();
+</script>
+</body>
+</html>
