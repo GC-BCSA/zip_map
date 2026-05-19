@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZipMap — Series Plotter</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -436,9 +436,6 @@
   #map-svg { cursor: grab; }
   #map-svg:active { cursor: grabbing; }
 
-  /* Keep border lines visually constant thickness while zooming */
-  .map-g path { vector-effect: non-scaling-stroke; }
-
   /* scroll styling */
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -512,42 +509,19 @@ let state = {
 // We'll use a pre-built approach: load from jsDelivr-hosted CSV
 
 async function loadZipDB() {
-  // Use the free GeoNames US zip code dataset via a reliable CDN
-  // Format: zip,lat,lon (we only need those 3 fields)
-  // ~42k US zip codes, ~1.5MB CSV
   if (state.zipDB) return state.zipDB;
-  
-  // We'll use a fetch from GeoNames data mirrored on GitHub/CDN
-  // The simplemaps US zip code database (basic/free tier) is commonly mirrored
-  // Using an alternative: fetch from a public API for individual lookups (zippopotam.us)
-  // But batching is needed for 200 zips — let's use the Nominatim/zippopotam approach
-  // 
-  // Best approach for offline-capable tool: embed a compressed zip->lat/lon lookup
-  // using the USPS free zip centroid data. We'll fetch from a reliable public source.
-  
   try {
-    // Primary source: simplemaps basic (public domain) via jsDelivr
-    const res = await fetch('https://raw.githubusercontent.com/scpike/us-state-county-zip/master/geo-data.csv');
+    const res = await fetch('https://cdn.jsdelivr.net/npm/us-zips/index.json');
     if (!res.ok) throw new Error('fetch failed');
-    const text = await res.text();
+    const data = await res.json();
+    // Format: { "54301": { latitude: 44.480778, longitude: -88.016063 }, ... }
     const db = new Map();
-    const lines = text.split('\n');
-    // Format: state,state_abbr,zipcode,county,city,lat,lng
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(',');
-      if (parts.length >= 7) {
-        const zip = parts[2].trim().padStart(5,'0');
-        const lat = parseFloat(parts[5]);
-        const lon = parseFloat(parts[6]);
-        if (zip && !isNaN(lat) && !isNaN(lon)) {
-          db.set(zip, {lat, lon});
-        }
-      }
+    for (const [zip, obj] of Object.entries(data)) {
+      db.set(zip, { lat: obj.latitude, lon: obj.longitude });
     }
     state.zipDB = db;
     return db;
   } catch(e) {
-    // Fallback: use zippopotam.us API per-zip (slower but works)
     state.zipDB = new Map();
     state.zipDB._useAPI = true;
     return state.zipDB;
@@ -834,9 +808,8 @@ function buildMap() {
         .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.7);
 
   } else {
-    // Contiguous 48 only: state FIPS codes are ≤ 56; territories (PR=72, USVI=78, Guam=66, etc.) are ≥ 60
     const stFeat = topojson.feature(usTopo, usTopo.objects.states).features
-                           .filter(f => +f.id <= 56 && +f.id !== 2 && +f.id !== 15);
+                           .filter(f => f.id !== '02' && f.id !== '15');
     const fc = {type:'FeatureCollection', features: stFeat};
     const pad = Math.min(W, H) * 0.04;
     const tempProj = proj.scale(1).translate([0, 0]);
