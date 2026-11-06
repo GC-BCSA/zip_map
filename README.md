@@ -160,6 +160,46 @@ Up to **10 series**, **200 zip codes each**. Each series is always fully expande
 
 ---
 
+## Plotting Whole States
+
+Each series card has a **Whole states** field below the zip code box. Any state entered there is filled in the series color when you click **PLOT ZIPS**.
+
+### Accepted Formats
+
+States can be entered three ways, and you can mix them in the same field:
+
+| Format | Example | Notes |
+|---|---|---|
+| Full name | `Texas`, `New York`, `District of Columbia` | Case-insensitive. Periods and extra spaces are ignored. |
+| Postal abbreviation | `TX`, `NY`, `DC` | Case-insensitive. |
+| FIPS code | `48`, `36`, `06` or `6` | The leading zero is optional. |
+
+Separate entries with commas, semicolons, newlines, or spaces. Multi-word names are recognized even when entries are separated by spaces, so all of these fill the same three states:
+
+```
+New York, California, Texas
+NY CA TX
+36; 06; 48
+new york CA 48
+```
+
+DC and the territories (Puerto Rico, Guam, U.S. Virgin Islands, American Samoa, Northern Mariana Islands) are supported.
+
+### How States Are Drawn
+
+- States are filled in the series color, slightly transparent, beneath all zip pins.
+- If more than one series fills the same state, the series lower in the sidebar is drawn on top.
+- Hovering over a filled state shows the series name and state name.
+- **HIDE / SHOW** hides or shows the series' states along with its pins.
+- A series can have zip codes, states, or both. A series with only states gets a filled square in the legend instead of a pin shape.
+- In the **Lower 48** view, Alaska and Hawaii are not filled because that view doesn't draw them. Territories outside the Albers USA insets are not shown in the **US 48+AK/HI** view.
+
+### Unrecognized Entries
+
+Anything that doesn't match a state is listed in red in the card status (for example, `Unrecognized: Texs`). Recognized entries in the same field are still filled.
+
+---
+
 ## Sidebar Footer
 
 <table style="border-spacing:6px">
