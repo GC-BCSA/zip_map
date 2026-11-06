@@ -153,9 +153,10 @@ Up to **10 series**, **200 zip codes each**. Each series is always fully expande
 | **Size** | Pin radius in pixels, range 3–18. |
 | **Border** | Toggles the dark outline stroke on pins on or off. |
 | **Zip codes** | Paste or type zip codes. Accepts comma, space, or newline delimiters. Maximum 200 per series. |
+| **Whole states** | Fills entire states in the series color (beneath the pins). Enter full state names, postal abbreviations, or FIPS codes in any mix, e.g. `Texas, CA, 36` or `New York NJ 9`. Case-insensitive; FIPS codes work with or without the leading zero. Includes DC and the territories (PR, GU, VI, AS, MP). Entries that aren't recognized are listed in the card status. A series can have states, zips, or both. |
 | **HIDE / SHOW** | Toggles visibility of the series pins on the map without deleting the data. |
 | **DEL** | Permanently removes the series. |
-| **Status** | Shows resolved/failed counts after PLOT ZIPS is run. |
+| **Status** | Shows resolved/failed zip counts and filled-state count after PLOT ZIPS is run. |
 
 ---
 

@@ -368,6 +368,21 @@
   textarea.zip-input:focus { border-color: var(--accent); }
   textarea.zip-input::placeholder { color: var(--text-dim); }
 
+  input.state-input {
+    width: 100%;
+    height: 28px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 0 8px;
+    outline: none;
+  }
+  input.state-input:focus { border-color: var(--accent); }
+  input.state-input::placeholder { color: var(--text-dim); }
+
   .zip-actions {
     display: flex;
     gap: 6px;
@@ -620,6 +635,74 @@ const MAX_SERIES = 10;
 const MAX_ZIPS = 200;
 const SHAPES = ['circle','square','diamond','triangle','star'];
 
+// ─── US STATES (FIPS → postal, name) ─────────────────────────────────────────
+const US_STATES = {
+  '01':['AL','Alabama'],        '02':['AK','Alaska'],         '04':['AZ','Arizona'],
+  '05':['AR','Arkansas'],       '06':['CA','California'],     '08':['CO','Colorado'],
+  '09':['CT','Connecticut'],    '10':['DE','Delaware'],       '11':['DC','District of Columbia'],
+  '12':['FL','Florida'],        '13':['GA','Georgia'],        '15':['HI','Hawaii'],
+  '16':['ID','Idaho'],          '17':['IL','Illinois'],       '18':['IN','Indiana'],
+  '19':['IA','Iowa'],           '20':['KS','Kansas'],         '21':['KY','Kentucky'],
+  '22':['LA','Louisiana'],      '23':['ME','Maine'],          '24':['MD','Maryland'],
+  '25':['MA','Massachusetts'],  '26':['MI','Michigan'],       '27':['MN','Minnesota'],
+  '28':['MS','Mississippi'],    '29':['MO','Missouri'],       '30':['MT','Montana'],
+  '31':['NE','Nebraska'],       '32':['NV','Nevada'],         '33':['NH','New Hampshire'],
+  '34':['NJ','New Jersey'],     '35':['NM','New Mexico'],     '36':['NY','New York'],
+  '37':['NC','North Carolina'], '38':['ND','North Dakota'],   '39':['OH','Ohio'],
+  '40':['OK','Oklahoma'],       '41':['OR','Oregon'],         '42':['PA','Pennsylvania'],
+  '44':['RI','Rhode Island'],   '45':['SC','South Carolina'], '46':['SD','South Dakota'],
+  '47':['TN','Tennessee'],      '48':['TX','Texas'],          '49':['UT','Utah'],
+  '50':['VT','Vermont'],        '51':['VA','Virginia'],       '53':['WA','Washington'],
+  '54':['WV','West Virginia'],  '55':['WI','Wisconsin'],      '56':['WY','Wyoming'],
+  '60':['AS','American Samoa'], '66':['GU','Guam'],           '69':['MP','Northern Mariana Islands'],
+  '72':['PR','Puerto Rico'],    '78':['VI','U.S. Virgin Islands'],
+};
+// Lookup keyed by normalized FIPS / postal / name → FIPS
+const STATE_LOOKUP = (() => {
+  const m = new Map();
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const [fips, [postal, name]] of Object.entries(US_STATES)) {
+    m.set(fips, fips);
+    m.set(String(+fips), fips);       // "6" as well as "06"
+    m.set(norm(postal), fips);
+    m.set(norm(name), fips);
+  }
+  m.set('virginislands', '78');
+  m.set('washingtondc', '11');
+  m._norm = norm;
+  return m;
+})();
+
+function matchState(text) {
+  const key = STATE_LOOKUP._norm(text);
+  return key ? STATE_LOOKUP.get(key) || null : null;
+}
+
+// Parse free text into state FIPS codes. Entries split on commas, semicolons,
+// or newlines; within an entry, words are matched greedily (longest first) so
+// "New York CA 48" works as well as "New York, CA, 48".
+function parseStates(raw) {
+  const found = [], bad = [];
+  for (const chunk of raw.split(/[,;\n]+/)) {
+    const words = chunk.trim().split(/\s+/).filter(Boolean);
+    let i = 0;
+    while (i < words.length) {
+      let hit = null, len = Math.min(4, words.length - i);
+      for (; len > 0; len--) {
+        hit = matchState(words.slice(i, i + len).join(' '));
+        if (hit) break;
+      }
+      if (hit) { found.push(hit); i += len; }
+      else     { bad.push(words[i]); i++; }
+    }
+  }
+  return { fips: [...new Set(found)], bad };
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let state = {
   view: 'us',
@@ -682,6 +765,9 @@ function makeSeries() {
     pinBorder: true,
     zipsRaw: '',
     resolved: [],   // [{zip,lat,lon,ok}]
+    statesRaw: '',
+    states: [],     // resolved FIPS codes
+    statesBad: [],  // unrecognized state entries
     visible: true
   };
 }
@@ -738,7 +824,12 @@ function buildSeriesCard(s) {
 
   const ok = s.resolved.filter(r => r.ok).length;
   const total = s.resolved.length;
-  const statusStr = total > 0 ? `<span class="${ok===total?'ok':'err'}">${ok}/${total}</span>` : `<span>${s.zipsRaw.split(/[\s,]+/).filter(z=>z.trim().length===5).length} entered</span>`;
+  const statusStr = (total > 0 ? `<span class="${ok===total?'ok':'err'}">${ok}/${total}</span>` : `<span>${s.zipsRaw.split(/[\s,]+/).filter(z=>z.trim().length===5).length} entered</span>`)
+                  + (s.states.length ? ` <span>· ${s.states.length} st</span>` : '');
+  const statusParts = [];
+  if (total > 0) statusParts.push(`<span class="${ok===total?'ok':'err'}">${ok} plotted, ${total-ok} failed</span>`);
+  if (s.states.length) statusParts.push(`<span class="ok">${s.states.length} state${s.states.length===1?'':'s'} filled</span>`);
+  if (s.statesBad.length) statusParts.push(`<span class="err">Unrecognized: ${escapeHTML(s.statesBad.join(', '))}</span>`);
 
   div.innerHTML = `
     <div class="series-header">
@@ -778,6 +869,9 @@ function buildSeriesCard(s) {
       </div>
       <textarea class="zip-input" placeholder="Enter zip codes separated by commas, spaces, or newlines…
 94103, 10001, 60614" onchange="updateSeries(${s.id},'zipsRaw',this.value)">${s.zipsRaw}</textarea>
+      <input class="state-input" placeholder="Whole states: Texas, CA, 36…" value="${escapeHTML(s.statesRaw)}"
+             title="Fill entire states. Enter full names, postal abbreviations, or FIPS codes."
+             onchange="updateSeries(${s.id},'statesRaw',this.value)" />
       <div class="zip-actions">
         <div style="display:flex;gap:5px">
           <button class="btn" style="padding:4px 9px;font-size:10px" onclick="toggleVisible(${s.id})">${s.visible?'HIDE':'SHOW'}</button>
@@ -785,7 +879,7 @@ function buildSeriesCard(s) {
         </div>
       </div>
       <div class="zip-status" id="zs-${s.id}">
-        ${total>0 ? `<span class="${ok===total?'ok':'err'}">${ok} plotted, ${total-ok} failed</span>` : ''}
+        ${statusParts.join('<br>')}
       </div>
     </div>
   `;
@@ -903,6 +997,7 @@ function buildMap() {
   // Single zoomable group containing both map and pins
   zoomG = svg.append('g').attr('class', 'zoom-g');
   mapG  = zoomG.append('g').attr('class', 'map-g');
+  zoomG.append('g').attr('class', 'states-fill-g');
   zoomG.append('g').attr('class', 'pins-g');
 
   let proj = getProjectionFn();
@@ -993,6 +1088,9 @@ async function plotAll() {
   for (const s of state.series) {
     const zips = s.zipsRaw.split(/[\s,\n]+/).map(z=>z.trim().replace(/\D/g,'')).filter(z=>z.length===5);
     const unique = [...new Set(zips)].slice(0, MAX_ZIPS);
+    const st = parseStates(s.statesRaw || '');
+    s.states = st.fips;
+    s.statesBad = st.bad;
     s.resolved = [];
     for (const z of unique) {
       const loc = await resolveZip(z);
@@ -1002,7 +1100,7 @@ async function plotAll() {
     const ok = s.resolved.filter(r=>r.ok).length;
     const total = s.resolved.length;
     const zs = document.getElementById(`zs-${s.id}`);
-    if (zs) zs.innerHTML = `<span class="${ok===total?'ok':'err'}">${ok} plotted, ${total-ok} failed</span>`;
+    if (zs && total > 0) zs.innerHTML = `<span class="${ok===total?'ok':'err'}">${ok} plotted, ${total-ok} failed</span>`;
   }
 
   overlay.classList.add('hidden');
@@ -1017,6 +1115,35 @@ function renderPins() {
   pinsG.selectAll('*').remove();
 
   const tooltip = document.getElementById('tooltip');
+
+  // ── Whole-state fills (drawn beneath all pins; later series paint on top) ──
+  const fillG = zoomG.select('.states-fill-g');
+  fillG.selectAll('*').remove();
+  const stateFeatById = new Map(
+    topojson.feature(usTopo, usTopo.objects.states).features.map(f => [f.id, f])
+  );
+  state.series.filter(s => s.visible).forEach(s => {
+    s.states.forEach(fips => {
+      if (state.view === 'lower48' && (fips === '02' || fips === '15')) return;
+      const feat = stateFeatById.get(fips);
+      if (!feat) return;
+      const d = pathFn(feat);
+      if (!d) return;
+      fillG.append('path')
+        .attr('d', d)
+        .attr('fill', s.color)
+        .attr('fill-opacity', 0.75)
+        .attr('stroke', '#979797')
+        .attr('stroke-width', state.view === 'world' ? 0.3 : 0.7)
+        .on('mouseover', () => {
+          tooltip.style.display = 'block';
+          tooltip.innerHTML = `<span style="color:${s.color}">${escapeHTML(s.name)}</span> · ${US_STATES[fips][1]}`;
+        }).on('mousemove', (event) => {
+          tooltip.style.left = (event.clientX + 14) + 'px';
+          tooltip.style.top  = (event.clientY - 8) + 'px';
+        }).on('mouseout', () => { tooltip.style.display = 'none'; });
+    });
+  });
 
   state.series.filter(s => s.visible).forEach(s => {
     s.resolved.filter(r => r.ok).forEach(r => {
@@ -1165,13 +1292,15 @@ function toggleLegend(on) {
 function renderLegend() {
   const el = document.getElementById('legendOverlay');
   if (!document.getElementById('legendCheck').checked) return;
-  const visible = state.series.filter(s => s.visible && s.resolved.some(r => r.ok));
+  const visible = state.series.filter(s => s.visible && (s.resolved.some(r => r.ok) || s.states.length));
   if (visible.length === 0) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   el.innerHTML = `<div class="legend-title">LEGEND</div>` +
     visible.map(s => `
       <div class="legend-item">
-        <div class="legend-pin">${legendPinSVG(s.shape, s.size > 10 ? 10 : s.size, s.color, s.pinBorder)}</div>
+        <div class="legend-pin">${s.resolved.some(r => r.ok)
+          ? legendPinSVG(s.shape, s.size > 10 ? 10 : s.size, s.color, s.pinBorder)
+          : `<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="2" fill="${s.color}" fill-opacity="0.75" stroke="#979797" stroke-width="0.8"/></svg>`}</div>
         <span style="overflow:hidden;text-overflow:ellipsis">${s.name}</span>
       </div>`).join('');
 }
