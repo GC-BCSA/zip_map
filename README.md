@@ -23,7 +23,7 @@ All header controls are uniform width and height. From left to right:
 <table>
 <tr>
 <td><kbd style="background:#1A204C;color:#fff;padding:6px 16px;border-radius:5px;font-family:monospace;font-size:12px;border:none;display:inline-block">US 48+AK/HI</kbd></td>
-<td>Map view showing the contiguous 48 states with Alaska and Hawaii insets. Projection is fixed to Albers USA.</td>
+<td>Map view showing the contiguous 48 states with Alaska and Hawaii insets, plus framed insets for the US territories (toggleable). Projection is fixed to Albers USA.</td>
 </tr>
 <tr>
 <td><kbd style="background:transparent;color:#fff;padding:6px 16px;border-radius:5px;font-family:monospace;font-size:12px;border:1px solid rgba(255,255,255,0.3);display:inline-block;background:#1A204C">LOWER 48</kbd></td>
@@ -57,9 +57,9 @@ All header controls are uniform width and height. From left to right:
 
 | View | Projection | Description |
 |---|---|---|
-| US 48+AK/HI | Albers USA (fixed) | All 50 states. Alaska and Hawaii rendered as insets in the lower left. |
-| Lower 48 | Selectable | Contiguous states only. Zoom in without the AK/HI insets. |
-| World | Selectable | Full world with country borders and US state detail overlaid. |
+| US 48+AK/HI | Albers USA (fixed) | All 50 states. Alaska and Hawaii rendered as insets in the lower left. US territories rendered as framed insets (see [Territory Insets](#territory-insets)). |
+| Lower 48 | Selectable | Contiguous states only. Zoom in without the AK/HI or territory insets. |
+| World | Selectable | Full world with country borders and US state and territory detail overlaid. Territories appear at their true locations. |
 
 **Pan:** click and drag anywhere on the map.  
 **Zoom:** scroll wheel. Scale range is 0.5&times; to 200&times;.  
@@ -192,11 +192,41 @@ DC and the territories (Puerto Rico, Guam, U.S. Virgin Islands, American Samoa, 
 - Hovering over a filled state shows the series name and state name.
 - **HIDE / SHOW** hides or shows the series' states along with its pins.
 - A series can have zip codes, states, or both. A series with only states gets a filled square in the legend instead of a pin shape.
-- In the **Lower 48** view, Alaska and Hawaii are not filled because that view doesn't draw them. Territories outside the Albers USA insets are not shown in the **US 48+AK/HI** view.
+- In the **Lower 48** view, Alaska, Hawaii, and the territories are not filled because that view doesn't draw them. In the **US 48+AK/HI** view, territories are filled inside their insets; a territory whose inset is toggled off is not shown.
 
 ### Unrecognized Entries
 
 Anything that doesn't match a state is listed in red in the card status (for example, `Unrecognized: Texs`). Recognized entries in the same field are still filled.
+
+---
+
+## Territory Insets
+
+In the **US 48+AK/HI** view, the five inhabited US territories are drawn as framed, labeled insets:
+
+| Inset | Territory | Position |
+|---|---|---|
+| MP | Northern Mariana Islands | Left column (Pacific), top. Shows the populated southern islands: Saipan, Tinian, Rota. |
+| GU | Guam | Left column (Pacific), middle |
+| AS | American Samoa | Left column (Pacific), bottom |
+| VI | U.S. Virgin Islands | Lower right (Atlantic), east of Florida |
+| PR | Puerto Rico | Lower right (Atlantic), east of Florida |
+
+**Toggles:** The **TERRITORY INSETS** row at the bottom of the sidebar has one checkbox per territory. It only appears in the US 48+AK/HI view. All five are on by default. Turning an inset off removes its frame, fill, and pins, and the map re-fits to use the freed space. Turning off all three Pacific insets (or both Caribbean ones) gives the 50-state map more room.
+
+Like the Alaska and Hawaii insets, each territory inset has its own scale. Inset sizes are not comparable to each other or to the states.
+
+**Zip codes:** Territory zip codes resolve and plot like any other zip:
+
+| Territory | Zip range |
+|---|---|
+| Puerto Rico | 006xx, 007xx, 009xx |
+| U.S. Virgin Islands | 008xx |
+| Guam | 96910–96932 |
+| Northern Mariana Islands | 96950–96952 |
+| American Samoa | 96799 |
+
+In the **World** view, territory pins and fills appear at their true locations, and the toggles don't apply.
 
 ---
 

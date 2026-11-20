@@ -413,6 +413,42 @@
   }
   .sidebar-proj .proj-select { flex: 1; }
 
+  .sidebar-terr {
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .sidebar-terr .proj-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+  }
+  .terr-toggles { display: flex; gap: 4px; }
+  .terr-chip {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .terr-chip:hover { border-color: var(--accent); }
+  .terr-chip.on { color: var(--text); border-color: var(--accent); }
+  .terr-chip input { accent-color: var(--accent); width: 11px; height: 11px; margin: 0; cursor: pointer; }
+
   .sidebar-footer {
     padding: 10px;
     border-top: 1px solid var(--border);
@@ -598,6 +634,10 @@
       <span class="proj-label">PROJECTION</span>
       <select class="proj-select" id="projSelect" onchange="setProjection(this.value)" style="flex:1;width:100%"></select>
     </div>
+    <div class="sidebar-terr" id="terrWrap">
+      <span class="proj-label">TERRITORY INSETS</span>
+      <div class="terr-toggles" id="terrToggles"></div>
+    </div>
     <div class="sidebar-footer">
       <button class="btn primary" style="flex:1" onclick="addSeries()">+ ADD SERIES</button>
       <button class="btn danger" onclick="clearAll()">CLEAR ALL</button>
@@ -673,6 +713,36 @@ const STATE_LOOKUP = (() => {
   return m;
 })();
 
+// ─── US TERRITORY INSETS ─────────────────────────────────────────────────────
+// Shown as framed insets in the US 48+AK/HI view (Albers USA can't project them).
+// box = [x0, y0, x1, y1] in Albers USA units at scale 1, relative to the map
+// center (the 50-state map spans roughly x -0.42…0.36, y -0.22…0.23).
+// Pacific territories sit west of the West Coast; Caribbean ones east of Florida.
+// focus (optional) = [[w,s],[e,n]] lon/lat area to fit instead of the whole
+// territory; anything outside the frame is clipped. MP focuses on its populated
+// southern islands (Saipan, Tinian, Rota) rather than the uninhabited north.
+const TERRITORIES = [
+  { fips: '69', postal: 'MP', box: [-0.475, -0.175, -0.385, -0.055],
+    focus: [[145.05, 14.05], [145.90, 15.30]] },
+  { fips: '66', postal: 'GU', box: [-0.475, -0.040, -0.385,  0.045] },
+  { fips: '60', postal: 'AS', box: [-0.475,  0.060, -0.385,  0.110] },
+  { fips: '78', postal: 'VI', box: [ 0.315,  0.105,  0.385,  0.165] },
+  { fips: '72', postal: 'PR', box: [ 0.265,  0.180,  0.385,  0.232] },
+];
+const TERRITORY_FIPS = new Set(TERRITORIES.map(t => t.fips));
+
+// Zip → zippopotam.us country code. Territory zips only resolve via their own
+// endpoint (e.g. /pr/00601), not /us/.
+function zipCountry(zip) {
+  const p3 = zip.slice(0, 3), n = +zip;
+  if (p3 === '006' || p3 === '007' || p3 === '009') return 'pr';
+  if (p3 === '008') return 'vi';
+  if (n === 96799) return 'as';
+  if (n >= 96910 && n <= 96932) return 'gu';
+  if (n >= 96950 && n <= 96952) return 'mp';
+  return 'us';
+}
+
 function matchState(text) {
   const key = STATE_LOOKUP._norm(text);
   return key ? STATE_LOOKUP.get(key) || null : null;
@@ -708,6 +778,7 @@ let state = {
   view: 'us',
   projection: 'albersUsa',
   showWater: true,
+  territories: new Set(TERRITORIES.map(t => t.fips)),  // enabled insets
   series: [],
   zipDB: null,         // Map<zip, {lat,lon}>
   geoWorld: null,
@@ -746,7 +817,7 @@ async function resolveZip(zip) {
   }
   // API fallback
   try {
-    const r = await fetch(`https://api.zippopotam.us/us/${zip}`);
+    const r = await fetch(`https://api.zippopotam.us/${zipCountry(zip)}/${zip}`);
     if (!r.ok) return null;
     const d = await r.json();
     return { lat: parseFloat(d.places[0].latitude), lon: parseFloat(d.places[0].longitude) };
@@ -932,10 +1003,44 @@ const svg = d3.select('#map-svg');
 let mapG, projection, pathFn;
 let worldTopo, usTopo;
 let zoomBehavior, zoomG;
+let insetProjs = new Map();   // fips → {proj, path, bounds} for territory insets (US view)
+
+function renderTerritoryToggles() {
+  document.getElementById('terrToggles').innerHTML = TERRITORIES.map(t => {
+    const on = state.territories.has(t.fips);
+    return `<label class="terr-chip${on ? ' on' : ''}" title="${US_STATES[t.fips][1]}">
+      <input type="checkbox"${on ? ' checked' : ''} onchange="setTerritory('${t.fips}', this.checked)">${t.postal}</label>`;
+  }).join('');
+}
+
+function setTerritory(fips, on) {
+  if (on) state.territories.add(fips); else state.territories.delete(fips);
+  renderTerritoryToggles();
+  if (worldTopo && usTopo) buildMap();
+}
+
+// Project a lon/lat in the current view, routing territory points to their inset.
+function projectPoint(lon, lat) {
+  for (const ip of insetProjs.values()) {
+    const [[w, s], [e, n]] = ip.bounds;
+    if (lon >= w - 0.5 && lon <= e + 0.5 && lat >= s - 0.5 && lat <= n + 0.5) {
+      const xy = ip.proj([lon, lat]);
+      const [fx0, fy0, fx1, fy1] = ip.frame;
+      return xy[0] >= fx0 && xy[0] <= fx1 && xy[1] >= fy0 && xy[1] <= fy1 ? xy : null;
+    }
+  }
+  return projection([lon, lat]);
+}
+
+function featurePath(feat) {
+  const ip = insetProjs.get(feat.id);
+  return ip ? ip.path(feat) : pathFn(feat);
+}
 
 function updateProjDropdown() {
   const sel = document.getElementById('projSelect');
   const wrap = document.getElementById('projWrap');
+  document.getElementById('terrWrap').style.display = state.view === 'us' ? 'flex' : 'none';
   if (state.view === 'us') {
     state.projection = 'albersUsa';
     wrap.style.display = 'none';
@@ -1001,6 +1106,7 @@ function buildMap() {
   zoomG.append('g').attr('class', 'pins-g');
 
   let proj = getProjectionFn();
+  insetProjs = new Map();
 
   if (state.view === 'world') {
     const sphere = {type:'Sphere'};
@@ -1024,11 +1130,52 @@ function buildMap() {
 
   } else if (state.view === 'us') {
     const pad = Math.min(W, H) * 0.04;
-    proj.fitExtent([[pad, pad],[W - pad, H - pad]], topojson.feature(usTopo, usTopo.objects.states));
-    const stateFeatures = topojson.feature(usTopo, usTopo.objects.states).features;
+    const allFeat = topojson.feature(usTopo, usTopo.objects.states).features;
+    const stateFeatures = allFeat.filter(f => !TERRITORY_FIPS.has(f.id));
+    const insets = TERRITORIES.filter(t => state.territories.has(t.fips));
+
+    // Fit the 50 states plus every enabled inset box into the viewport
+    proj.scale(1).translate([0, 0]);
+    let [[x0, y0], [x1, y1]] = d3.geoPath(proj).bounds({type:'FeatureCollection', features: stateFeatures});
+    insets.forEach(({box}) => {
+      x0 = Math.min(x0, box[0]); y0 = Math.min(y0, box[1]);
+      x1 = Math.max(x1, box[2]); y1 = Math.max(y1, box[3]);
+    });
+    const k = Math.min((W - 2*pad) / (x1 - x0), (H - 2*pad) / (y1 - y0));
+    const tx = W/2 - k * (x0 + x1) / 2;
+    const ty = H/2 - k * (y0 + y1) / 2;
+    proj.scale(k).translate([tx, ty]);
+
     mapG.selectAll('path.state').data(stateFeatures).enter().append('path').attr('class','state')
         .attr('d', d3.geoPath(proj))
         .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.7);
+
+    // Territory insets: framed box, own Mercator fitted to the territory, label
+    const insetG = mapG.append('g').attr('class','insets-g');
+    const fontSize = Math.max(8, Math.min(12, k * 0.0075));
+    insets.forEach(t => {
+      const feat = allFeat.find(f => f.id === t.fips);
+      if (!feat) return;
+      const bx0 = tx + k*t.box[0], by0 = ty + k*t.box[1];
+      const bx1 = tx + k*t.box[2], by1 = ty + k*t.box[3];
+      const ip = Math.min(bx1 - bx0, by1 - by0) * 0.15;
+      const fitTo = t.focus ? {type:'MultiPoint', coordinates: t.focus} : feat;
+      const p = d3.geoMercator()
+        .fitExtent([[bx0 + ip, by0 + ip + fontSize*0.6], [bx1 - ip, by1 - ip]], fitTo)
+        .clipExtent([[bx0, by0], [bx1, by1]]);
+      const path = d3.geoPath(p);
+      insetG.append('rect')
+        .attr('x', bx0).attr('y', by0).attr('width', bx1 - bx0).attr('height', by1 - by0)
+        .attr('fill', 'none').attr('stroke', '#979797').attr('stroke-width', 0.7);
+      insetG.append('path').datum(feat).attr('class','state')
+        .attr('d', path)
+        .attr('fill','#EAEAEA').attr('stroke','#979797').attr('stroke-width',0.7);
+      insetG.append('text')
+        .attr('x', bx0 + 4).attr('y', by0 + fontSize + 2)
+        .attr('font-family', 'Arial, sans-serif').attr('font-size', fontSize)
+        .attr('fill', '#5A6A71').text(t.postal);
+      insetProjs.set(t.fips, { proj: p, path, bounds: d3.geoBounds(feat), frame: [bx0, by0, bx1, by1] });
+    });
 
   } else {
     const stFeat = topojson.feature(usTopo, usTopo.objects.states).features
@@ -1059,6 +1206,8 @@ function buildMap() {
       zoomG.attr('transform', event.transform);
     });
   svg.call(zoomBehavior);
+  // The map was rebuilt untransformed, so clear any zoom state left on the svg
+  svg.call(zoomBehavior.transform, d3.zoomIdentity);
   // Don't double-count middle-click drag
   svg.on('dblclick.zoom', null);
 
@@ -1127,7 +1276,7 @@ function renderPins() {
       if (state.view === 'lower48' && (fips === '02' || fips === '15')) return;
       const feat = stateFeatById.get(fips);
       if (!feat) return;
-      const d = pathFn(feat);
+      const d = featurePath(feat);
       if (!d) return;
       fillG.append('path')
         .attr('d', d)
@@ -1148,7 +1297,7 @@ function renderPins() {
   state.series.filter(s => s.visible).forEach(s => {
     s.resolved.filter(r => r.ok).forEach(r => {
       let xy;
-      try { xy = projection([r.lon, r.lat]); } catch(e) { return; }
+      try { xy = projectPoint(r.lon, r.lat); } catch(e) { return; }
       if (!xy) return;
 
       const g = pinsG.append('g')
@@ -1333,6 +1482,7 @@ function legendPinSVG(shape, size, color, border) {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 addSeries();   // Start with one series
+renderTerritoryToggles();
 initMap();
 </script>
 </body>
